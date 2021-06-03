@@ -5,6 +5,30 @@ defmodule CriteriaGenerator do
   use Timex
   import Ecto.Query
 
+  def perform(%{
+    workspace_id: workspace_id,
+    triggers: triggers,
+    contact_id: contact_id
+  }) do
+    triggers = Enum.reduce triggers, [], fn trigger, acc ->
+      if trigger.filter_type in ["event", "intent"] do
+        acc
+      else
+        [trigger | acc]
+      end
+    end
+
+    # generate the internal AND queries for each criteria
+    criteria_query = generate_dynamic_query(%{query: false, triggers: triggers, workspace_id: workspace_id, contact_id: contact_id})
+
+    dynamic([
+      contact,
+      contact_membership,
+      contact_engagement,
+      score,
+    ], ^criteria_query)
+  end
+
   # perform an update since an ID is being passed
   def perform(%{
     id: id,
@@ -22,16 +46,14 @@ defmodule CriteriaGenerator do
           contact,
           contact_membership,
           contact_engagement,
-          csat_score,
-          promoter_score
+          score,
         ], ^criteria_query)
       else
         dynamic([
           contact,
           contact_membership,
           contact_engagement,
-          csat_score,
-          promoter_score
+          score,
         ], ^criteria_query or ^query)
       end
     end)
@@ -56,21 +78,56 @@ defmodule CriteriaGenerator do
           contact,
           contact_membership,
           contact_engagement,
-          csat_score,
-          promoter_score
+          score,
         ], ^criteria_query)
       else
         dynamic([
           contact,
           contact_membership,
           contact_engagement,
-          csat_score,
-          promoter_score
+          score,
         ], ^criteria_query or ^query)
       end
     end)
 
     dynamic
+  end
+
+  defp generate_dynamic_query(%{
+    query: query,
+    triggers: triggers,
+    workspace_id: workspace_id,
+    contact_id: contact_id
+  }) do
+    dynamic = dynamic([
+      contact,
+      contact_membership,
+      contact_engagement,
+      score,
+    ],
+      contact.workspace_id == ^workspace_id and contact.id == ^contact_id
+    )
+
+    Enum.reduce(triggers, dynamic, fn property, query -> 
+      # createa params to save criteria to database
+      sanitized_property = Map.put(
+        # because ENUM have to be upcase, let's first downcase it and then convert to an atom
+        Map.put(property, :filter_type, String.to_atom(String.downcase(property.filter_type))),
+        :field_type,
+        String.to_atom(String.downcase(property.field_type))
+      )
+      property_query = format_property(sanitized_property, query)
+
+      IO.inspect [FORMATTED_PROPERTY: property_query]
+
+      # Concatenate the queries together with an OR
+      dynamic([
+        contact,
+        contact_membership,
+        contact_engagement,
+        score,
+      ], ^property_query and ^query)
+    end)
   end
 
   defp generate_dynamic_query(%{
@@ -83,8 +140,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       contact.workspace_id == ^workspace_id and contact.id == ^contact.id
     )
@@ -106,8 +162,7 @@ defmodule CriteriaGenerator do
         contact,
         contact_membership,
         contact_engagement,
-        csat_score,
-        promoter_score
+        score,
       ], ^property_query and ^query)
     end)
 
@@ -125,8 +180,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       contact.workspace_id == ^workspace_id
     )
@@ -148,8 +202,7 @@ defmodule CriteriaGenerator do
         contact,
         contact_membership,
         contact_engagement,
-        csat_score,
-        promoter_score
+        score,
       ], ^property_query and ^query)
     end)
 
@@ -246,8 +299,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score
+      score,
     ],
       contact_membership.contact_list_id == ^field
   )
@@ -268,8 +320,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score
+      score,
     ],
       contact_membership.contact_list_id != ^field
   )
@@ -294,8 +345,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND obj->>'value' ILIKE ANY (?))",
@@ -322,8 +372,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (obj->>'value')::boolean = ?)",
@@ -350,8 +399,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (string_to_array(obj->>'value', ';') && string_to_array(?, ';')))",
@@ -378,8 +426,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (string_to_array(obj->>'value', ';') && string_to_array(?, ';')))",
@@ -406,8 +453,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND date_trunc('day', (obj->>'value')::timestamp) = date_trunc('day', ?::timestamp))",
@@ -434,8 +480,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (obj->>'value')::int = ?)",
@@ -465,8 +510,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND obj->>'value' NOT ILIKE ANY (?))",
@@ -493,8 +537,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (obj->>'value')::boolean != ?)",
@@ -521,8 +564,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND NOT (string_to_array(obj->>'value', ';') && string_to_array(?, ';')))",
@@ -549,8 +591,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND NOT (string_to_array(obj->>'value', ';') && string_to_array(?, ';')))",
@@ -577,8 +618,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND date_trunc('day', (obj->>'value')::timestamp) != date_trunc('day', ?::timestamp))",
@@ -605,8 +645,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (obj->>'value')::int != ?)",
@@ -636,8 +675,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND obj->>'value' ~* ?",
@@ -664,8 +702,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (string_to_array(obj->>'value', ';') @> string_to_array(?, ';')))",
@@ -692,8 +729,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (string_to_array(obj->>'value', ';') @> string_to_array(?, ';')))",
@@ -723,8 +759,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND obj->>'value' !~* ?",
@@ -751,8 +786,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND NOT (string_to_array(obj->>'value', ';') @> string_to_array(?, ';')))",
@@ -779,8 +813,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND NOT (string_to_array(obj->>'value', ';') @> string_to_array(?, ';')))",
@@ -807,8 +840,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE (obj->>'property' = ?) IS NOT NULL)",
@@ -834,8 +866,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE (obj->>'property' = ?) IS NULL)",
@@ -861,8 +892,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (obj->>'value')::int <= ?)",
@@ -889,8 +919,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (obj->>'value')::int < ?)",
@@ -917,8 +946,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (obj->>'value')::int >= ?)",
@@ -945,8 +973,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (obj->>'value')::int > ?)",
@@ -973,8 +1000,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND date_trunc('day', (obj->>'value')::timestamp) < date_trunc('day', ?::timestamp))",
@@ -1001,8 +1027,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND date_trunc('day', (obj->>'value')::timestamp) > date_trunc('day', ?::timestamp))",
@@ -1029,8 +1054,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND date_trunc('day', (obj->>'value')::timestamp) < date_trunc('day', ?::timestamp))",
@@ -1057,8 +1081,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND date_trunc('day', (obj->>'value')::timestamp) > date_trunc('day', ?::timestamp))",
@@ -1085,8 +1108,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND date_trunc('day', (obj->>'value')::timestamp) > date_trunc('day', ?::timestamp))",
@@ -1113,8 +1135,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND date_trunc('day', (obj->>'value')::timestamp) < date_trunc('day', ?::timestamp))",
@@ -1142,8 +1163,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "contact.last_reached IS NULL"
@@ -1168,8 +1188,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "contact.last_reached IS NOT NULL"
@@ -1194,8 +1213,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact.last_reached) = date_trunc('day', ?::timestamp)",
@@ -1221,8 +1239,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact.last_reached) != date_trunc('day', ?::timestamp)",
@@ -1248,8 +1265,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact.last_reached) < date_trunc('day', ?::timestamp)",
@@ -1275,8 +1291,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact.last_reached) > date_trunc('day', ?::timestamp)",
@@ -1302,8 +1317,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact.last_reached) < date_trunc('day', ?::timestamp)",
@@ -1329,8 +1343,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact.last_reached) > date_trunc('day', ?::timestamp)",
@@ -1356,8 +1369,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact.last_reached) > date_trunc('day', ?::timestamp)",
@@ -1383,8 +1395,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact.last_reached) < date_trunc('day', ?::timestamp)",
@@ -1409,8 +1420,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "contact_engagement.inserted_at IS NULL AND contact_engagement.type = ?",
@@ -1435,8 +1445,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "contact_engagement.inserted_at IS NOT NULL AND contact_engagement.type = ?",
@@ -1461,8 +1470,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) = date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1488,8 +1496,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) != date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1515,8 +1522,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) < date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1542,8 +1548,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) > date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1569,8 +1574,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) < date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1596,8 +1600,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) > date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1623,8 +1626,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) > date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1650,8 +1652,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) < date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1677,8 +1678,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "contact_engagement.inserted_at IS NULL AND contact_engagement.type = ?",
@@ -1703,8 +1703,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "contact_engagement.inserted_at IS NOT NULL AND contact_engagement.type = ?",
@@ -1729,8 +1728,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) = date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1756,8 +1754,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) != date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1783,8 +1780,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) < date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1810,8 +1806,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) > date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1837,8 +1832,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) < date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1864,8 +1858,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) > date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1891,8 +1884,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) > date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1918,8 +1910,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) < date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -1945,8 +1936,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "contact_engagement.inserted_at IS NULL AND contact_engagement.type = ?",
@@ -1971,8 +1961,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "contact_engagement.inserted_at IS NOT NULL AND contact_engagement.type = ?",
@@ -1997,8 +1986,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) = date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -2024,8 +2012,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) != date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -2051,8 +2038,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) < date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -2078,8 +2064,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) > date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -2105,8 +2090,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) < date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -2132,8 +2116,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) > date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -2159,8 +2142,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) > date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -2186,8 +2168,7 @@ defmodule CriteriaGenerator do
     dynamic = dynamic([
       contact,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "date_trunc('day', contact_engagement.inserted_at) < date_trunc('day', ?::timestamp) AND contact_engagement.type = ?",
@@ -2213,8 +2194,7 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
         "exists (SELECT * FROM jsonb_array_elements(?) obj WHERE obj->>'property' = ? AND (obj->>'value')::int != ?)",
@@ -2242,12 +2222,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "csat_score.score = ?",
-        ^value
+        "score.score = ? AND score.type = ?",
+        ^value,
+        :csat
       )
     )
   end
@@ -2269,12 +2249,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "csat_score.score != ?",
-        ^value
+        "score.score != ? AND score.type = ?",
+        ^value,
+        :csat
       )
     )
   end
@@ -2296,12 +2276,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "csat_score.score <= ?",
-        ^value
+        "score.score <= ? AND score.type = ?",
+        ^value,
+        :csat
       )
     )
   end
@@ -2323,12 +2303,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "csat_score.score < ?",
-        ^value
+        "score.score < ? AND score.type = ?",
+        ^value,
+        :csat
       )
     )
   end
@@ -2350,12 +2330,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "csat_score.score >= ?",
-        ^value
+        "score.score >= ? AND score.type = ?",
+        ^value,
+        :csat
       )
     )
   end
@@ -2377,12 +2357,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "csat_score.score > ?",
-        ^value
+        "score.score > ? AND score.type = ?",
+        ^value,
+        :csat
       )
     )
   end
@@ -2404,11 +2384,11 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score
+      score,
     ],
       fragment(
-        "csat_score.contact_id IS NULL"
+        "score.contact_id IS NULL AND score.type = ?",
+        :csat
       )
     )
   end
@@ -2430,11 +2410,11 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score
+      score,
     ],
       fragment(
-        "csat_score.contact_id IS NOT NULL"
+        "score.contact_id IS NOT NULL AND score.type = ?",
+        :csat
       )
     )
   end
@@ -2456,12 +2436,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "promoter_score.score = ?",
-        ^value
+        "score.score = ? AND score.type =",
+        ^value,
+        :nps
       )
     )
   end
@@ -2483,12 +2463,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "promoter_score.score != ?",
-        ^value
+        "score.score != ? AND score.type = ?",
+        ^value,
+        :nps
       )
     )
   end
@@ -2510,12 +2490,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "promoter_score.score <= ?",
-        ^value
+        "score.score <= ? AND score.type = ?",
+        ^value,
+        :nps
       )
     )
   end
@@ -2537,12 +2517,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "promoter_score.score < ?",
-        ^value
+        "score.score < ? AND score.type = ?",
+        ^value,
+        :nps
       )
     )
   end
@@ -2564,12 +2544,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "promoter_score.score >= ?",
-        ^value
+        "score.score >= ? AND score.type = ?",
+        ^value,
+        :nps
       )
     )
   end
@@ -2591,12 +2571,12 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score,
+      score,
     ],
       fragment(
-        "promoter_score.score > ?",
-        ^value
+        "score.score > ? AND score.type = ?",
+        ^value,
+        :nps
       )
     )
   end
@@ -2618,11 +2598,11 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score
+      score,
     ],
       fragment(
-        "promoter_score.contact_id IS NULL"
+        "score.contact_id IS NULL AND score.type = ?",
+        :nps
       )
     )
   end
@@ -2644,11 +2624,11 @@ defmodule CriteriaGenerator do
       contact,
       contact_membership,
       contact_engagement,
-      csat_score,
-      promoter_score
+      score,
     ],
       fragment(
-        "promoter_score.contact_id IS NOT NULL"
+        "score.contact_id IS NOT NULL AND score.type = ?",
+        :nps
       )
     )
   end
