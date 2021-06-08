@@ -7,19 +7,19 @@ defmodule CriteriaGenerator do
 
   def perform(%{
     workspace_id: workspace_id,
-    triggers: triggers,
+    properties: properties,
     contact_id: contact_id
   }) do
-    triggers = Enum.reduce triggers, [], fn trigger, acc ->
-      if trigger.filter_type in ["event", "intent"] do
+    properties = Enum.reduce properties, [], fn property, acc ->
+      if property.filter_type in ["event", "intent"] do
         acc
       else
-        [trigger | acc]
+        [property | acc]
       end
     end
 
     # generate the internal AND queries for each criteria
-    criteria_query = generate_dynamic_query(%{query: false, triggers: triggers, workspace_id: workspace_id, contact_id: contact_id})
+    criteria_query = generate_dynamic_query(%{query: false, properties: properties, workspace_id: workspace_id, contact_id: contact_id})
 
     dynamic([
       contact,
@@ -95,7 +95,7 @@ defmodule CriteriaGenerator do
 
   defp generate_dynamic_query(%{
     query: query,
-    triggers: triggers,
+    properties: properties,
     workspace_id: workspace_id,
     contact_id: contact_id
   }) do
@@ -108,7 +108,7 @@ defmodule CriteriaGenerator do
       contact.workspace_id == ^workspace_id and contact.id == ^contact_id
     )
 
-    Enum.reduce(triggers, dynamic, fn property, query -> 
+    Enum.reduce(properties, dynamic, fn property, query -> 
       # createa params to save criteria to database
       sanitized_property = Map.put(
         # because ENUM have to be upcase, let's first downcase it and then convert to an atom
