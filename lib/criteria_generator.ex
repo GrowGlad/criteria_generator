@@ -2432,14 +2432,14 @@ defmodule CriteriaGenerator do
   filter_type == :survey_data and
   field_type == :number and
   field != "csat" do
-    dynamic = dynamic([
+    dynamic([
       contact,
       contact_membership,
       contact_engagement,
       score,
     ],
       fragment(
-        "score.score = ? AND score.type =",
+        "score.score = ? AND score.type = ?",
         ^value,
         :nps
       )
